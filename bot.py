@@ -82,7 +82,7 @@ def build_job_keyboard(status: str = "free") -> Optional[list]:
     )
     btn3 = LinkButton(
         text="Задать вопрос",
-        url=f"https://max.me/{ADMIN_ID}"
+        url=f"https://max.ru/{ADMIN_ID}"
     )
 
     payload = ButtonsPayload(buttons=[[btn1, btn2], [btn3]])
@@ -284,7 +284,7 @@ async def handle_callback(event: MessageCallback):
                 f"Новая бронь!\n\n"
                 f"Заявка:\n{job['text']}\n\n"
                 f"Исполнитель: {user_name}\n"
-                f"Профиль: https://max.me/{user_id}\n"
+                f"Профиль: https://max.ru/{user_id}\n"
                 f"Тип: {type_label}\n\n"
                 f"Нажмите кнопку \"Закрыть\" после завершения работы."
             )
