@@ -46,6 +46,16 @@ dp = Dispatcher()
 
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
+def get_user_name(user) -> str:
+    """Получает имя пользователя из объекта User."""
+    if user.username:
+        return f"@{user.username}"
+    name = user.first_name
+    if user.last_name:
+        name += f" {user.last_name}"
+    return name or f"User_{user.user_id}"
+
+
 def build_job_keyboard(status: str = "free") -> Optional[list]:
     """Создаёт inline-клавиатуру для заявки."""
     if status in ("booked", "closed"):
@@ -169,10 +179,11 @@ async def cmd_start(event: MessageCreated):
 async def handle_admin_message(event: MessageCreated):
     """Обработка сообщений от администратора (новые заявки)."""
     user_id = event.message.sender.user_id
+    chat_id = event.message.recipient.chat_id
 
     if user_id != ADMIN_ID:
         return
-    if event.message.chat_id == GROUP_ID:
+    if chat_id == GROUP_ID:
         await event.message.answer("❌ Отправляйте заявки мне в личку, а не в группу!")
         return
 
@@ -226,7 +237,7 @@ async def handle_callback(event: MessageCallback):
     callback_data = callback.payload
     user = callback.user
     user_id = user.user_id
-    user_name = user.name or f"User_{user_id}"
+    user_name = get_user_name(user)
 
     try:
         data = json.loads(callback_data) if callback_data else {}
