@@ -3,7 +3,7 @@ import logging
 import json
 import os
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from maxapi import Bot, Dispatcher, F
 from maxapi.types import (
@@ -13,6 +13,10 @@ from maxapi.types import (
     BotStarted,
     Callback,
     Message,
+    Attachment,
+    ButtonsPayload,
+    CallbackButton,
+    LinkButton,
 )
 
 # ==================== КОНФИГУРАЦИЯ ====================
@@ -56,32 +60,40 @@ def get_user_name(user) -> str:
     return name or f"User_{user.user_id}"
 
 
-def build_job_keyboard(status: str = "free") -> Optional[list]:
+def build_job_keyboard(status: str = "free") -> Optional[List[Attachment]]:
     """Создаёт inline-клавиатуру для заявки."""
     if status in ("booked", "closed"):
         return None
 
-    return [
-        [
-            {
-                "type": "callback",
-                "text": "🙋 Беру",
-                "payload": json.dumps({"action": "take", "type": "single"})
-            },
-            {
-                "type": "callback",
-                "text": "👥 Беру вдвоём",
-                "payload": json.dumps({"action": "take", "type": "pair"})
-            }
-        ],
-        [
-            {
-                "type": "link",
-                "text": "❓ Задать вопрос",
-                "url": f"https://max.me/{ADMIN_ID}"
-            }
-        ]
-    ]
+    btn1 = CallbackButton(
+        text="🙋 Беру",
+        payload=json.dumps({"action": "take", "type": "single"})
+    )
+    btn2 = CallbackButton(
+        text="👥 Беру вдвоём",
+        payload=json.dumps({"action": "take", "type": "pair"})
+    )
+    btn3 = LinkButton(
+        text="❓ Задать вопрос",
+        url=f"https://max.me/{ADMIN_ID}"
+    )
+
+    payload = ButtonsPayload(buttons=[[btn1, btn2], [btn3]])
+    attachment = Attachment(type="inline_keyboard", payload=payload)
+
+    return [attachment]
+
+
+def build_admin_keyboard(job_msg_id: str) -> List[Attachment]:
+    """Создаёт клавиатуру с кнопкой Закрыть для админа."""
+    btn = CallbackButton(
+        text="🔒 Закрыть заявку",
+        payload=json.dumps({"action": "close", "job_msg_id": job_msg_id})
+    )
+    payload = ButtonsPayload(buttons=[[btn]])
+    attachment = Attachment(type="inline_keyboard", payload=payload)
+
+    return [attachment]
 
 
 def build_admin_notification(job_text: str, user_info: dict, take_type: str) -> str:
@@ -193,13 +205,13 @@ async def handle_admin_message(event: MessageCreated):
         return
 
     group_text = build_group_message(job_text, "free", created_at=datetime.now().isoformat())
-    keyboard = build_job_keyboard("free")
+    attachments = build_job_keyboard("free")
 
     try:
         response = await bot.send_message(
             chat_id=GROUP_ID,
             text=group_text,
-            attachments=keyboard
+            attachments=attachments
         )
 
         group_message_id = str(response.message_id)
@@ -308,20 +320,12 @@ async def handle_callback(event: MessageCallback):
                 "id": user_id, "name": user_name
             }, take_type)
 
-            admin_keyboard = [
-                [
-                    {
-                        "type": "callback",
-                        "text": "🔒 Закрыть заявку",
-                        "payload": json.dumps({"action": "close", "job_msg_id": message_id})
-                    }
-                ]
-            ]
+            admin_attachments = build_admin_keyboard(msg_id_str)
 
             admin_msg = await bot.send_message(
                 chat_id=ADMIN_ID,
                 text=admin_text,
-                attachments=admin_keyboard
+                attachments=admin_attachments
             )
 
             admin_msg_id = str(admin_msg.message_id)
