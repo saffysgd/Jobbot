@@ -1,3 +1,8 @@
+"""
+Бот для управления заявками на работу через MAX API.
+Адаптирован для деплоя на Amvera Cloud.
+"""
+
 import asyncio
 import logging
 import json
@@ -26,21 +31,20 @@ GROUP_ID = int(os.environ.get("GROUP_ID", "0"))
 TOKEN = os.environ.get("MAX_BOT_TOKEN", "")
 
 if not TOKEN:
-    raise ValueError("MAX_BOT_TOKEN не задан! Задайте переменную в Amvera → Переменные")
+    raise ValueError("MAX_BOT_TOKEN не задан!")
 if ADMIN_ID == 0:
-    raise ValueError("ADMIN_ID не задан! Задайте переменную в Amvera → Переменные")
+    raise ValueError("ADMIN_ID не задан!")
 if GROUP_ID == 0:
-    raise ValueError("GROUP_ID не задан! Задайте переменную в Amvera → Переменные")
+    raise ValueError("GROUP_ID не задан!")
 
 if GROUP_ID > 0:
     GROUP_ID = -GROUP_ID
 
-# Хранилище заявок в памяти
 jobs_db: Dict[str, Any] = {}
 
 # ==================== ЛОГИРОВАНИЕ ====================
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # DEBUG для максимальной детализации
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
@@ -52,7 +56,6 @@ dp = Dispatcher()
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
 def get_user_name(user) -> str:
-    """Получает имя пользователя из объекта User."""
     if user is None:
         return "Unknown"
     if user.username:
@@ -64,7 +67,6 @@ def get_user_name(user) -> str:
 
 
 def build_job_keyboard(status: str = "free") -> Optional[list]:
-    """Создаёт inline-клавиатуру для заявки."""
     if status in ("booked", "closed"):
         return None
 
@@ -88,7 +90,6 @@ def build_job_keyboard(status: str = "free") -> Optional[list]:
 
 
 def build_admin_keyboard(job_msg_id: str) -> list:
-    """Создаёт клавиатуру с кнопкой Закрыть для админа."""
     btn = CallbackButton(
         text="🔒 Закрыть заявку",
         payload=json.dumps({"action": "close", "job_msg_id": job_msg_id}),
@@ -98,29 +99,8 @@ def build_admin_keyboard(job_msg_id: str) -> list:
     return [Attachment(type="inline_keyboard", payload=payload)]
 
 
-def build_admin_notification(job_text: str, user_info: dict, take_type: str) -> str:
-    """Формирует текст уведомления для администратора."""
-    type_label = "вдвоём" if take_type == "pair" else "один"
-    user_name = user_info.get("name", "Неизвестно")
-    user_link = f"https://max.me/{user_info.get('id', '')}"
-
-    text = job_text[:100]
-    if len(job_text) > 100:
-        text += "..."
-
-    return (
-        "🔔 Новая бронь!\n\n"
-        f"📋 Заявка: {text}\n\n"
-        f"👤 Исполнитель: {user_name}\n"
-        f"🔗 Профиль: {user_link}\n"
-        f"📌 Тип: {type_label}\n\n"
-        "Нажмите кнопку \"Закрыть\" после завершения работы."
-    )
-
-
 def build_group_message(job_text: str, status: str, user_name: Optional[str] = None,
                         take_type: Optional[str] = None, created_at: Optional[str] = None) -> str:
-    """Формирует текст сообщения в группе в зависимости от статуса."""
     time_str = created_at[:16].replace("T", " ") if created_at else datetime.now().strftime("%d.%m.%Y %H:%M")
 
     if status == "free":
@@ -159,7 +139,7 @@ def build_group_message(job_text: str, status: str, user_name: Optional[str] = N
 
 @dp.bot_started()
 async def on_bot_started(event: BotStarted):
-    """Приветствие при старте бота."""
+    logger.info(f"BOT_STARTED: chat_id={event.chat_id}")
     await event.bot.send_message(
         chat_id=event.chat_id,
         text="👋 Привет! Я бот для управления заявками.\n\n"
@@ -170,44 +150,46 @@ async def on_bot_started(event: BotStarted):
 
 @dp.message_created(Command("start"))
 async def cmd_start(event: MessageCreated):
-    """Обработка команды /start."""
     user_id = event.message.sender.user_id if event.message.sender else None
+    logger.info(f"CMD_START: user_id={user_id}, ADMIN_ID={ADMIN_ID}")
 
     if user_id == ADMIN_ID:
         await event.message.answer(
             "👨‍💼 Панель администратора\n\n"
-            "Отправьте мне текст заявки — я опубликую её в группе.\n\n"
-            "Когда исполнитель нажмёт \"Беру\" или \"Беру вдвоём\", "
-            "вы получите уведомление с его контактом.\n\n"
-            "После завершения работы нажмите \"Закрыть\" в уведомлении."
+            "Отправьте мне текст заявки — я опубликую её в группе."
         )
     else:
         await event.message.answer(
-            "🤖 Я бот для управления заявками.\n\n"
-            "Заявки публикуются в рабочей группе. "
-            "Нажимайте кнопки под заявками, чтобы взять их в работу."
+            "🤖 Я бот для управления заявками."
         )
 
 
 @dp.message_created()
 async def handle_admin_message(event: MessageCreated):
-    """Обработка сообщений от администратора (новые заявки)."""
     user_id = event.message.sender.user_id if event.message.sender else None
     chat_id = event.message.recipient.chat_id
+    job_text = event.message.body.text if event.message.body else None
+
+    logger.info(f"ADMIN_MSG: user_id={user_id}, chat_id={chat_id}, text={job_text[:50] if job_text else None}")
+    logger.info(f"ADMIN_MSG: user_id==ADMIN_ID? {user_id == ADMIN_ID}, chat_id==GROUP_ID? {chat_id == GROUP_ID}")
 
     if user_id != ADMIN_ID:
+        logger.info("ADMIN_MSG: ignored — not admin")
         return
     if chat_id == GROUP_ID:
+        logger.info("ADMIN_MSG: ignored — sent to group")
         await event.message.answer("❌ Отправляйте заявки мне в личку, а не в группу!")
         return
 
-    job_text = event.message.body.text if event.message.body else None
     if not job_text:
+        logger.info("ADMIN_MSG: no text")
         await event.message.answer("❌ Отправьте текстовое сообщение с описанием заявки.")
         return
 
     group_text = build_group_message(job_text, "free", created_at=datetime.now().isoformat())
     attachments = build_job_keyboard("free")
+
+    logger.info(f"ADMIN_MSG: sending to GROUP_ID={GROUP_ID}")
 
     try:
         response = await bot.send_message(
@@ -216,9 +198,13 @@ async def handle_admin_message(event: MessageCreated):
             attachments=attachments
         )
 
-        # SendedMessage имеет поле message (Message), у которого body.mid — ID сообщения
-        group_message_id = str(response.message.body.mid) if response.message and response.message.body else None
-        if group_message_id:
+        logger.info(f"ADMIN_MSG: response type={type(response)}")
+        logger.info(f"ADMIN_MSG: response has message? {hasattr(response, 'message')}")
+
+        if response.message and response.message.body:
+            group_message_id = str(response.message.body.mid)
+            logger.info(f"ADMIN_MSG: published msg_id={group_message_id}")
+
             jobs_db[group_message_id] = {
                 "status": "free",
                 "text": job_text,
@@ -234,12 +220,12 @@ async def handle_admin_message(event: MessageCreated):
                 f"✅ Заявка опубликована в группе!\n\n"
                 f"ID сообщения: {group_message_id}"
             )
-            logger.info(f"Job published: msg_id={group_message_id}, admin={ADMIN_ID}")
         else:
+            logger.warning("ADMIN_MSG: no message in response")
             await event.message.answer("⚠️ Заявка отправлена, но не удалось получить ID сообщения.")
 
     except Exception as e:
-        logger.error(f"Failed to publish job: {e}")
+        logger.error(f"ADMIN_MSG ERROR: {e}", exc_info=True)
         await event.message.answer(f"❌ Ошибка публикации: {e}")
 
 
@@ -248,45 +234,70 @@ async def handle_admin_message(event: MessageCreated):
 @dp.message_callback()
 async def handle_callback(event: MessageCallback):
     """Обработка нажатий на inline-кнопки."""
+    logger.info("=" * 60)
+    logger.info("CALLBACK RECEIVED")
+    logger.info("=" * 60)
+
     callback: Callback = event.callback
     callback_data = callback.payload
     user = callback.user
     user_id = user.user_id
     user_name = get_user_name(user)
 
+    logger.info(f"CALLBACK: user_id={user_id}, user_name={user_name}")
+    logger.info(f"CALLBACK: payload={callback_data}")
+
     try:
         data = json.loads(callback_data) if callback_data else {}
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.error(f"CALLBACK: JSON parse error: {e}")
         data = {}
 
     action = data.get("action")
     take_type = data.get("type")
 
+    logger.info(f"CALLBACK: action={action}, take_type={take_type}")
+    logger.info(f"CALLBACK: jobs_db keys={list(jobs_db.keys())}")
+
     message: Optional[Message] = event.message
     if not message:
+        logger.warning("CALLBACK: no message in event")
         await event.answer(notification="❌ Ошибка: не найдено сообщение")
         return
 
-    # message_id берём из body.mid
     message_id = message.body.mid if message.body else None
     chat_id = message.recipient.chat_id if message.recipient else None
 
+    logger.info(f"CALLBACK: message_id={message_id}, chat_id={chat_id}")
+    logger.info(f"CALLBACK: chat_id==GROUP_ID? {chat_id == GROUP_ID}, GROUP_ID={GROUP_ID}")
+
     if not message_id:
+        logger.warning("CALLBACK: no message_id")
         await event.answer(notification="❌ Ошибка: не найден ID сообщения")
         return
 
     if chat_id != GROUP_ID:
+        logger.info(f"CALLBACK: ignored — chat_id {chat_id} != GROUP_ID {GROUP_ID}")
         return
 
     msg_id_str = str(message_id)
     job = jobs_db.get(msg_id_str)
+
+    logger.info(f"CALLBACK: msg_id_str={msg_id_str}, job found={job is not None}")
+
     if not job:
+        logger.warning(f"CALLBACK: job not found for msg_id={msg_id_str}")
         await event.answer(notification="❌ Заявка не найдена")
         return
 
-    # === БРОНИРОВАНИЕ (Беру / Беру вдвоём) ===
+    logger.info(f"CALLBACK: job status={job.get('status')}")
+
+    # === БРОНИРОВАНИЕ ===
     if action == "take":
+        logger.info(f"CALLBACK TAKE: processing...")
+
         if job["status"] != "free":
+            logger.info(f"CALLBACK TAKE: job not free, status={job['status']}")
             await event.answer(notification="❌ Заявка уже забронирована или закрыта")
             return
 
@@ -302,59 +313,70 @@ async def handle_callback(event: MessageCallback):
             take_type=take_type, created_at=job.get("created_at")
         )
 
+        logger.info(f"CALLBACK TAKE: editing message {message_id}")
+
         try:
-            # Редактируем сообщение в группе (убираем кнопки)
+            # Редактируем сообщение в группе
             await message.edit(
                 text=updated_text,
                 attachments=[]
             )
+            logger.info("CALLBACK TAKE: message edited successfully")
 
             await event.answer(notification=f"✅ Вы забронировали заявку ({type_label})!")
+            logger.info("CALLBACK TAKE: callback answered")
 
-            # Уведомление админу с кнопкой "Закрыть"
-            admin_text = build_admin_notification(job["text"], {
-                "id": user_id, "name": user_name
-            }, take_type)
+            # Уведомление админу
+            admin_text = (
+                "🔔 Новая бронь!\n\n"
+                f"📋 Заявка: {job['text'][:100]}{'...' if len(job['text']) > 100 else ''}\n\n"
+                f"👤 Исполнитель: {user_name}\n"
+                f"🔗 Профиль: https://max.me/{user_id}\n"
+                f"📌 Тип: {type_label}\n\n"
+                "Нажмите кнопку \"Закрыть\" после завершения работы."
+            )
 
             admin_attachments = build_admin_keyboard(msg_id_str)
 
+            logger.info(f"CALLBACK TAKE: sending notification to admin {ADMIN_ID}")
             admin_response = await bot.send_message(
                 chat_id=ADMIN_ID,
                 text=admin_text,
                 attachments=admin_attachments
             )
 
-            # ID уведомления админа — из body.mid
             admin_msg_id = str(admin_response.message.body.mid) if admin_response.message and admin_response.message.body else None
             job["admin_msg_id"] = admin_msg_id
 
-            logger.info(
-                f"Job booked: msg_id={message_id}, user={user_name}({user_id}), "
-                f"type={take_type}, admin_notified={admin_msg_id}"
-            )
+            logger.info(f"CALLBACK TAKE: admin notified, admin_msg_id={admin_msg_id}")
 
         except Exception as e:
-            logger.error(f"Failed to process booking: {e}")
+            logger.error(f"CALLBACK TAKE ERROR: {e}", exc_info=True)
             job["status"] = "free"
             job["user_id"] = None
             await event.answer(notification="❌ Произошла ошибка, попробуйте позже")
 
-    # === ЗАКРЫТИЕ ЗАЯВКИ (админ нажимает "Закрыть") ===
+    # === ЗАКРЫТИЕ ===
     elif action == "close":
+        logger.info("CALLBACK CLOSE: processing...")
+
         job_msg_id = data.get("job_msg_id")
+        logger.info(f"CALLBACK CLOSE: job_msg_id={job_msg_id}")
 
         if not job_msg_id:
             await event.answer(notification="❌ Ошибка: не найдена заявка")
             return
 
-        # Проверяем, что закрывает админ
         if user_id != ADMIN_ID:
+            logger.info(f"CALLBACK CLOSE: user {user_id} is not admin {ADMIN_ID}")
             await event.answer(notification="❌ Только администратор может закрывать заявки")
             return
 
         job_msg_id_str = str(job_msg_id)
         job_to_close = jobs_db.get(job_msg_id_str)
+
         if not job_to_close:
+            logger.warning(f"CALLBACK CLOSE: job not found for {job_msg_id_str}")
             await event.answer(notification="❌ Заявка не найдена")
             return
 
@@ -369,35 +391,42 @@ async def handle_callback(event: MessageCallback):
         )
 
         try:
-            # Обновляем сообщение в группе
+            logger.info(f"CALLBACK CLOSE: editing group message {job_msg_id}")
             await bot.edit_message(
                 message_id=job_msg_id,
                 text=closed_text
             )
+            logger.info("CALLBACK CLOSE: group message edited")
 
-            # Удаляем кнопки у админа (редактируем сообщение уведомления)
             if job_to_close.get("admin_msg_id"):
                 text = job_to_close['text'][:100]
                 if len(job_to_close['text']) > 100:
                     text += "..."
+                logger.info(f"CALLBACK CLOSE: editing admin message {job_to_close['admin_msg_id']}")
                 await bot.edit_message(
                     message_id=job_to_close["admin_msg_id"],
                     text=f"✅ Заявка закрыта\n\n{text}"
                 )
 
             await event.answer(notification="✅ Заявка закрыта!")
-            logger.info(f"Job closed: msg_id={job_msg_id}, admin={ADMIN_ID}")
+            logger.info("CALLBACK CLOSE: done")
 
         except Exception as e:
-            logger.error(f"Failed to close job: {e}")
+            logger.error(f"CALLBACK CLOSE ERROR: {e}", exc_info=True)
             await event.answer(notification="❌ Ошибка закрытия заявки")
+
+    else:
+        logger.info(f"CALLBACK: unknown action={action}")
+        await event.answer(notification="❌ Неизвестное действие")
 
 
 # ==================== ЗАПУСК ====================
 
 async def main():
-    logger.info("Bot starting...")
+    logger.info("=" * 60)
+    logger.info("BOT STARTING")
     logger.info(f"ADMIN_ID={ADMIN_ID}, GROUP_ID={GROUP_ID}")
+    logger.info("=" * 60)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
