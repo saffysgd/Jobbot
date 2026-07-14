@@ -298,14 +298,19 @@ async def handle_callback(event: MessageCallback):
             await event.answer(notification=f"✅ Вы забронировали заявку ({type_label})!")
 
             # Уведомление админу с markdown-упоминанием
+            display_name = user.first_name if user else "Исполнитель"
+            if user and user.last_name:
+                display_name += f" {user.last_name}"
+            
             admin_text = (
                 "🔔 Новая бронь!\n\n"
                 + f"📋 Заявка:\n{job['text']}\n\n"
                 + f"👤 Исполнитель: {user_name}\n"
-                + f"🔗 Профиль: [Открыть профиль](max://user/{user_id})\n"
+                + f"🔗 Профиль: [{display_name}](max://user/{user_id})\n"
                 + f"📌 Тип: {type_label}\n\n"
                 + "Нажмите кнопку \"Закрыть\" после завершения работы."
             )
+
 
             admin_attachments = build_admin_keyboard(msg_id_str)
 
