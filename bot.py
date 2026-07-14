@@ -80,21 +80,17 @@ def build_admin_notification(job_text: str, user_info: dict, take_type: str) -> 
     user_name = user_info.get("name", "Неизвестно")
     user_link = f"https://max.me/{user_info.get('id', '')}"
 
+    text = job_text[:100]
+    if len(job_text) > 100:
+        text += "..."
+
     return (
-        f"🔔 Новая бронь!
-
-"
-        f"📋 Заявка: {job_text[:100]}{'...' if len(job_text) > 100 else ''}
-
-"
-        f"👤 Исполнитель: {user_name}
-"
-        f"🔗 Профиль: {user_link}
-"
-        f"📌 Тип: {type_label}
-
-"
-        f"Нажмите кнопку "Закрыть" после завершения работы."
+        "🔔 Новая бронь!\n\n"
+        f"📋 Заявка: {text}\n\n"
+        f"👤 Исполнитель: {user_name}\n"
+        f"🔗 Профиль: {user_link}\n"
+        f"📌 Тип: {type_label}\n\n"
+        "Нажмите кнопку \"Закрыть\" после завершения работы."
     )
 
 
@@ -105,54 +101,32 @@ def build_group_message(job_text: str, status: str, user_name: Optional[str] = N
 
     if status == "free":
         return (
-            f"📢 НОВАЯ ЗАЯВКА
-"
-            f"⏰ {time_str}
-"
-            f"━━━━━━━━━━━━━━
-
-"
-            f"{job_text}
-
-"
-            f"━━━━━━━━━━━━━━
-"
-            f"🟢 Статус: Свободно"
+            f"📢 НОВАЯ ЗАЯВКА\n"
+            f"⏰ {time_str}\n"
+            "━━━━━━━━━━━━━━\n\n"
+            f"{job_text}\n\n"
+            "━━━━━━━━━━━━━━\n"
+            "🟢 Статус: Свободно"
         )
     elif status == "booked":
         type_label = "вдвоём" if take_type == "pair" else "один"
         return (
-            f"📢 ЗАЯВКА
-"
-            f"⏰ {time_str}
-"
-            f"━━━━━━━━━━━━━━
-
-"
-            f"{job_text}
-
-"
-            f"━━━━━━━━━━━━━━
-"
-            f"🟡 Статус: Забронировано ({type_label})
-"
+            f"📢 ЗАЯВКА\n"
+            f"⏰ {time_str}\n"
+            "━━━━━━━━━━━━━━\n\n"
+            f"{job_text}\n\n"
+            "━━━━━━━━━━━━━━\n"
+            f"🟡 Статус: Забронировано ({type_label})\n"
             f"👤 Исполнитель: {user_name or 'Неизвестно'}"
         )
     elif status == "closed":
         return (
-            f"✅ ЗАКРЫТО
-"
-            f"⏰ {time_str}
-"
-            f"━━━━━━━━━━━━━━
-
-"
-            f"{job_text}
-
-"
-            f"━━━━━━━━━━━━━━
-"
-            f"❗️ Заявка выполнена"
+            f"✅ ЗАКРЫТО\n"
+            f"⏰ {time_str}\n"
+            "━━━━━━━━━━━━━━\n\n"
+            f"{job_text}\n\n"
+            "━━━━━━━━━━━━━━\n"
+            "❗️ Заявка выполнена"
         )
     return job_text
 
@@ -164,9 +138,7 @@ async def on_bot_started(event: BotStarted):
     """Приветствие при старте бота."""
     await event.bot.send_message(
         chat_id=event.chat_id,
-        text="👋 Привет! Я бот для управления заявками.
-
-"
+        text="👋 Привет! Я бот для управления заявками.\n\n"
              "Администраторы могут отправлять мне тексты заявок, "
              "а я буду публиковать их в группе с кнопками для исполнителей."
     )
@@ -179,23 +151,15 @@ async def cmd_start(event: MessageCreated):
 
     if user_id == ADMIN_ID:
         await event.message.answer(
-            "👨‍💼 Панель администратора
-
-"
-            "Отправьте мне текст заявки — я опубликую её в группе.
-
-"
-            "Когда исполнитель нажмёт "Беру" или "Беру вдвоём", "
-            "вы получите уведомление с его контактом.
-
-"
-            "После завершения работы нажмите "Закрыть" в уведомлении."
+            "👨‍💼 Панель администратора\n\n"
+            "Отправьте мне текст заявки — я опубликую её в группе.\n\n"
+            "Когда исполнитель нажмёт \"Беру\" или \"Беру вдвоём\", "
+            "вы получите уведомление с его контактом.\n\n"
+            "После завершения работы нажмите \"Закрыть\" в уведомлении."
         )
     else:
         await event.message.answer(
-            "🤖 Я бот для управления заявками.
-
-"
+            "🤖 Я бот для управления заявками.\n\n"
             "Заявки публикуются в рабочей группе. "
             "Нажимайте кнопки под заявками, чтобы взять их в работу."
         )
@@ -241,9 +205,7 @@ async def handle_admin_message(event: MessageCreated):
             }
 
             await event.message.answer(
-                f"✅ Заявка опубликована в группе!
-
-"
+                f"✅ Заявка опубликована в группе!\n\n"
                 f"ID сообщения: {group_message_id}"
             )
             logger.info(f"Job published: msg_id={group_message_id}, admin={ADMIN_ID}")
@@ -274,7 +236,6 @@ async def handle_callback(event: MessageCallback):
     action = data.get("action")
     take_type = data.get("type")
 
-    # Получаем сообщение, к которому привязан callback
     message: Optional[Message] = event.message
     if not message:
         await bot.send_callback(
@@ -400,17 +361,11 @@ async def handle_callback(event: MessageCallback):
         job_to_close["status"] = "closed"
 
         closed_text = (
-            f"✅ ЗАКРЫТО
-"
-            f"━━━━━━━━━━━━━━
-
-"
-            f"{job_to_close['text']}
-
-"
-            f"━━━━━━━━━━━━━━
-"
-            f"❗️ Заявка выполнена"
+            "✅ ЗАКРЫТО\n"
+            "━━━━━━━━━━━━━━\n\n"
+            f"{job_to_close['text']}\n\n"
+            "━━━━━━━━━━━━━━\n"
+            "❗️ Заявка выполнена"
         )
 
         try:
@@ -422,11 +377,12 @@ async def handle_callback(event: MessageCallback):
 
             # Удаляем кнопки у админа (редактируем сообщение уведомления)
             if job_to_close.get("admin_msg_id"):
+                text = job_to_close['text'][:100]
+                if len(job_to_close['text']) > 100:
+                    text += "..."
                 await bot.edit_message(
                     message_id=job_to_close["admin_msg_id"],
-                    text=f"✅ Заявка закрыта
-
-{job_to_close['text'][:100]}..."
+                    text=f"✅ Заявка закрыта\n\n{text}"
                 )
 
             await bot.send_callback(
