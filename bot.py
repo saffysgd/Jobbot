@@ -3,7 +3,7 @@ import logging
 import json
 import os
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 from maxapi import Bot, Dispatcher, F
 from maxapi.types import (
@@ -13,11 +13,12 @@ from maxapi.types import (
     BotStarted,
     Callback,
     Message,
-    Attachment,
-    ButtonsPayload,
     CallbackButton,
+    ButtonsPayload,
+    Attachment,
     LinkButton,
 )
+from maxapi.enums.intent import Intent
 
 # ==================== КОНФИГУРАЦИЯ ====================
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
@@ -60,18 +61,20 @@ def get_user_name(user) -> str:
     return name or f"User_{user.user_id}"
 
 
-def build_job_keyboard(status: str = "free") -> Optional[List[Attachment]]:
+def build_job_keyboard(status: str = "free") -> Optional[list]:
     """Создаёт inline-клавиатуру для заявки."""
     if status in ("booked", "closed"):
         return None
 
     btn1 = CallbackButton(
         text="🙋 Беру",
-        payload=json.dumps({"action": "take", "type": "single"})
+        payload=json.dumps({"action": "take", "type": "single"}),
+        intent=Intent.POSITIVE
     )
     btn2 = CallbackButton(
         text="👥 Беру вдвоём",
-        payload=json.dumps({"action": "take", "type": "pair"})
+        payload=json.dumps({"action": "take", "type": "pair"}),
+        intent=Intent.POSITIVE
     )
     btn3 = LinkButton(
         text="❓ Задать вопрос",
@@ -79,21 +82,18 @@ def build_job_keyboard(status: str = "free") -> Optional[List[Attachment]]:
     )
 
     payload = ButtonsPayload(buttons=[[btn1, btn2], [btn3]])
-    attachment = Attachment(type="inline_keyboard", payload=payload)
-
-    return [attachment]
+    return [Attachment(type="inline_keyboard", payload=payload)]
 
 
-def build_admin_keyboard(job_msg_id: str) -> List[Attachment]:
+def build_admin_keyboard(job_msg_id: str) -> list:
     """Создаёт клавиатуру с кнопкой Закрыть для админа."""
     btn = CallbackButton(
         text="🔒 Закрыть заявку",
-        payload=json.dumps({"action": "close", "job_msg_id": job_msg_id})
+        payload=json.dumps({"action": "close", "job_msg_id": job_msg_id}),
+        intent=Intent.NEGATIVE
     )
     payload = ButtonsPayload(buttons=[[btn]])
-    attachment = Attachment(type="inline_keyboard", payload=payload)
-
-    return [attachment]
+    return [Attachment(type="inline_keyboard", payload=payload)]
 
 
 def build_admin_notification(job_text: str, user_info: dict, take_type: str) -> str:
@@ -261,10 +261,7 @@ async def handle_callback(event: MessageCallback):
 
     message: Optional[Message] = event.message
     if not message:
-        await bot.send_callback(
-            callback_id=callback.callback_id,
-            notification="❌ Ошибка: не найдено сообщение"
-        )
+        await event.answer(notification="❌ Ошибка: не найдено сообщение")
         return
 
     message_id = message.message_id
@@ -276,19 +273,13 @@ async def handle_callback(event: MessageCallback):
     msg_id_str = str(message_id)
     job = jobs_db.get(msg_id_str)
     if not job:
-        await bot.send_callback(
-            callback_id=callback.callback_id,
-            notification="❌ Заявка не найдена"
-        )
+        await event.answer(notification="❌ Заявка не найдена")
         return
 
     # === БРОНИРОВАНИЕ (Беру / Беру вдвоём) ===
     if action == "take":
         if job["status"] != "free":
-            await bot.send_callback(
-                callback_id=callback.callback_id,
-                notification="❌ Заявка уже забронирована или закрыта"
-            )
+            await event.answer(notification="❌ Заявка уже забронирована или закрыта")
             return
 
         job["status"] = "booked"
@@ -305,15 +296,12 @@ async def handle_callback(event: MessageCallback):
 
         try:
             # Редактируем сообщение в группе (убираем кнопки)
-            await bot.edit_message(
-                message_id=message_id,
-                text=updated_text
+            await event.message.edit(
+                text=updated_text,
+                attachments=[]
             )
 
-            await bot.send_callback(
-                callback_id=callback.callback_id,
-                notification=f"✅ Вы забронировали заявку ({type_label})!"
-            )
+            await event.answer(notification=f"✅ Вы забронировали заявку ({type_label})!")
 
             # Уведомление админу с кнопкой "Закрыть"
             admin_text = build_admin_notification(job["text"], {
@@ -340,37 +328,25 @@ async def handle_callback(event: MessageCallback):
             logger.error(f"Failed to process booking: {e}")
             job["status"] = "free"
             job["user_id"] = None
-            await bot.send_callback(
-                callback_id=callback.callback_id,
-                notification="❌ Произошла ошибка, попробуйте позже"
-            )
+            await event.answer(notification="❌ Произошла ошибка, попробуйте позже")
 
     # === ЗАКРЫТИЕ ЗАЯВКИ (админ нажимает "Закрыть") ===
     elif action == "close":
         job_msg_id = data.get("job_msg_id")
 
         if not job_msg_id:
-            await bot.send_callback(
-                callback_id=callback.callback_id,
-                notification="❌ Ошибка: не найдена заявка"
-            )
+            await event.answer(notification="❌ Ошибка: не найдена заявка")
             return
 
         # Проверяем, что закрывает админ
         if user_id != ADMIN_ID:
-            await bot.send_callback(
-                callback_id=callback.callback_id,
-                notification="❌ Только администратор может закрывать заявки"
-            )
+            await event.answer(notification="❌ Только администратор может закрывать заявки")
             return
 
         job_msg_id_str = str(job_msg_id)
         job_to_close = jobs_db.get(job_msg_id_str)
         if not job_to_close:
-            await bot.send_callback(
-                callback_id=callback.callback_id,
-                notification="❌ Заявка не найдена"
-            )
+            await event.answer(notification="❌ Заявка не найдена")
             return
 
         job_to_close["status"] = "closed"
@@ -400,18 +376,12 @@ async def handle_callback(event: MessageCallback):
                     text=f"✅ Заявка закрыта\n\n{text}"
                 )
 
-            await bot.send_callback(
-                callback_id=callback.callback_id,
-                notification="✅ Заявка закрыта!"
-            )
+            await event.answer(notification="✅ Заявка закрыта!")
             logger.info(f"Job closed: msg_id={job_msg_id}, admin={ADMIN_ID}")
 
         except Exception as e:
             logger.error(f"Failed to close job: {e}")
-            await bot.send_callback(
-                callback_id=callback.callback_id,
-                notification="❌ Ошибка закрытия заявки"
-            )
+            await event.answer(notification="❌ Ошибка закрытия заявки")
 
 
 # ==================== ЗАПУСК ====================
