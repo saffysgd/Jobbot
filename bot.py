@@ -44,7 +44,7 @@ jobs_db: Dict[str, Any] = {}
 
 # ==================== ЛОГИРОВАНИЕ ====================
 logging.basicConfig(
-    level=logging.DEBUG,  # DEBUG для максимальной детализации
+    level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
@@ -166,18 +166,31 @@ async def cmd_start(event: MessageCreated):
 
 @dp.message_created()
 async def handle_admin_message(event: MessageCreated):
-    user_id = event.message.sender.user_id if event.message.sender else None
+    """Обработка сообщений от администратора (новые заявки)."""
+    logger.info("=" * 60)
+    logger.info("ADMIN_MESSAGE RECEIVED")
+    logger.info("=" * 60)
+
+    # Проверяем sender
+    if event.message.sender is None:
+        logger.warning("ADMIN_MSG: sender is None, skipping")
+        return
+
+    user_id = event.message.sender.user_id
     chat_id = event.message.recipient.chat_id
     job_text = event.message.body.text if event.message.body else None
 
-    logger.info(f"ADMIN_MSG: user_id={user_id}, chat_id={chat_id}, text={job_text[:50] if job_text else None}")
-    logger.info(f"ADMIN_MSG: user_id==ADMIN_ID? {user_id == ADMIN_ID}, chat_id==GROUP_ID? {chat_id == GROUP_ID}")
+    logger.info(f"ADMIN_MSG: user_id={user_id}, chat_id={chat_id}")
+    logger.info(f"ADMIN_MSG: user_id==ADMIN_ID? {user_id == ADMIN_ID}")
+    logger.info(f"ADMIN_MSG: chat_id==GROUP_ID? {chat_id == GROUP_ID}")
+    logger.info(f"ADMIN_MSG: text={job_text[:50] if job_text else None}")
 
     if user_id != ADMIN_ID:
-        logger.info("ADMIN_MSG: ignored — not admin")
+        logger.info("ADMIN_MSG: not admin, skipping")
         return
+
     if chat_id == GROUP_ID:
-        logger.info("ADMIN_MSG: ignored — sent to group")
+        logger.info("ADMIN_MSG: sent to group, skipping")
         await event.message.answer("❌ Отправляйте заявки мне в личку, а не в группу!")
         return
 
@@ -190,6 +203,8 @@ async def handle_admin_message(event: MessageCreated):
     attachments = build_job_keyboard("free")
 
     logger.info(f"ADMIN_MSG: sending to GROUP_ID={GROUP_ID}")
+    logger.info(f"ADMIN_MSG: text length={len(group_text)}")
+    logger.info(f"ADMIN_MSG: attachments={attachments is not None}")
 
     try:
         response = await bot.send_message(
@@ -199,12 +214,34 @@ async def handle_admin_message(event: MessageCreated):
         )
 
         logger.info(f"ADMIN_MSG: response type={type(response)}")
-        logger.info(f"ADMIN_MSG: response has message? {hasattr(response, 'message')}")
+        logger.info(f"ADMIN_MSG: response={response}")
 
-        if response.message and response.message.body:
-            group_message_id = str(response.message.body.mid)
-            logger.info(f"ADMIN_MSG: published msg_id={group_message_id}")
+        # Проверяем все возможные пути к message_id
+        if hasattr(response, 'message'):
+            logger.info(f"ADMIN_MSG: response.message={response.message}")
+            if response.message:
+                logger.info(f"ADMIN_MSG: response.message.body={response.message.body}")
+                if response.message.body:
+                    logger.info(f"ADMIN_MSG: response.message.body.mid={response.message.body.mid}")
+                    group_message_id = str(response.message.body.mid)
+                else:
+                    logger.warning("ADMIN_MSG: response.message.body is None")
+                    group_message_id = None
+            else:
+                logger.warning("ADMIN_MSG: response.message is None")
+                group_message_id = None
+        else:
+            logger.warning("ADMIN_MSG: response has no message attribute")
+            group_message_id = None
 
+        # Альтернативные пути
+        if not group_message_id:
+            for attr in ['message_id', 'id', 'mid']:
+                if hasattr(response, attr):
+                    val = getattr(response, attr)
+                    logger.info(f"ADMIN_MSG: response.{attr}={val}")
+
+        if group_message_id:
             jobs_db[group_message_id] = {
                 "status": "free",
                 "text": job_text,
@@ -216,12 +253,14 @@ async def handle_admin_message(event: MessageCreated):
                 "created_at": datetime.now().isoformat()
             }
 
+            logger.info(f"ADMIN_MSG: saved to jobs_db, keys now={list(jobs_db.keys())}")
+
             await event.message.answer(
                 f"✅ Заявка опубликована в группе!\n\n"
                 f"ID сообщения: {group_message_id}"
             )
         else:
-            logger.warning("ADMIN_MSG: no message in response")
+            logger.warning("ADMIN_MSG: could not get message_id")
             await event.message.answer("⚠️ Заявка отправлена, но не удалось получить ID сообщения.")
 
     except Exception as e:
@@ -258,6 +297,7 @@ async def handle_callback(event: MessageCallback):
 
     logger.info(f"CALLBACK: action={action}, take_type={take_type}")
     logger.info(f"CALLBACK: jobs_db keys={list(jobs_db.keys())}")
+    logger.info(f"CALLBACK: jobs_db content={jobs_db}")
 
     message: Optional[Message] = event.message
     if not message:
@@ -269,7 +309,7 @@ async def handle_callback(event: MessageCallback):
     chat_id = message.recipient.chat_id if message.recipient else None
 
     logger.info(f"CALLBACK: message_id={message_id}, chat_id={chat_id}")
-    logger.info(f"CALLBACK: chat_id==GROUP_ID? {chat_id == GROUP_ID}, GROUP_ID={GROUP_ID}")
+    logger.info(f"CALLBACK: chat_id==GROUP_ID? {chat_id == GROUP_ID}")
 
     if not message_id:
         logger.warning("CALLBACK: no message_id")
@@ -294,7 +334,7 @@ async def handle_callback(event: MessageCallback):
 
     # === БРОНИРОВАНИЕ ===
     if action == "take":
-        logger.info(f"CALLBACK TAKE: processing...")
+        logger.info("CALLBACK TAKE: processing...")
 
         if job["status"] != "free":
             logger.info(f"CALLBACK TAKE: job not free, status={job['status']}")
@@ -316,17 +356,14 @@ async def handle_callback(event: MessageCallback):
         logger.info(f"CALLBACK TAKE: editing message {message_id}")
 
         try:
-            # Редактируем сообщение в группе
             await message.edit(
                 text=updated_text,
                 attachments=[]
             )
-            logger.info("CALLBACK TAKE: message edited successfully")
+            logger.info("CALLBACK TAKE: message edited")
 
             await event.answer(notification=f"✅ Вы забронировали заявку ({type_label})!")
-            logger.info("CALLBACK TAKE: callback answered")
 
-            # Уведомление админу
             admin_text = (
                 "🔔 Новая бронь!\n\n"
                 f"📋 Заявка: {job['text'][:100]}{'...' if len(job['text']) > 100 else ''}\n\n"
@@ -338,17 +375,19 @@ async def handle_callback(event: MessageCallback):
 
             admin_attachments = build_admin_keyboard(msg_id_str)
 
-            logger.info(f"CALLBACK TAKE: sending notification to admin {ADMIN_ID}")
+            logger.info(f"CALLBACK TAKE: sending to admin {ADMIN_ID}")
             admin_response = await bot.send_message(
                 chat_id=ADMIN_ID,
                 text=admin_text,
                 attachments=admin_attachments
             )
 
-            admin_msg_id = str(admin_response.message.body.mid) if admin_response.message and admin_response.message.body else None
-            job["admin_msg_id"] = admin_msg_id
+            admin_msg_id = None
+            if hasattr(admin_response, 'message') and admin_response.message and admin_response.message.body:
+                admin_msg_id = str(admin_response.message.body.mid)
 
-            logger.info(f"CALLBACK TAKE: admin notified, admin_msg_id={admin_msg_id}")
+            job["admin_msg_id"] = admin_msg_id
+            logger.info(f"CALLBACK TAKE: admin_msg_id={admin_msg_id}")
 
         except Exception as e:
             logger.error(f"CALLBACK TAKE ERROR: {e}", exc_info=True)
@@ -368,7 +407,7 @@ async def handle_callback(event: MessageCallback):
             return
 
         if user_id != ADMIN_ID:
-            logger.info(f"CALLBACK CLOSE: user {user_id} is not admin {ADMIN_ID}")
+            logger.info(f"CALLBACK CLOSE: user {user_id} != admin {ADMIN_ID}")
             await event.answer(notification="❌ Только администратор может закрывать заявки")
             return
 
@@ -391,18 +430,18 @@ async def handle_callback(event: MessageCallback):
         )
 
         try:
-            logger.info(f"CALLBACK CLOSE: editing group message {job_msg_id}")
+            logger.info(f"CALLBACK CLOSE: editing group msg {job_msg_id}")
             await bot.edit_message(
                 message_id=job_msg_id,
                 text=closed_text
             )
-            logger.info("CALLBACK CLOSE: group message edited")
+            logger.info("CALLBACK CLOSE: group msg edited")
 
             if job_to_close.get("admin_msg_id"):
                 text = job_to_close['text'][:100]
                 if len(job_to_close['text']) > 100:
                     text += "..."
-                logger.info(f"CALLBACK CLOSE: editing admin message {job_to_close['admin_msg_id']}")
+                logger.info(f"CALLBACK CLOSE: editing admin msg {job_to_close['admin_msg_id']}")
                 await bot.edit_message(
                     message_id=job_to_close["admin_msg_id"],
                     text=f"✅ Заявка закрыта\n\n{text}"
