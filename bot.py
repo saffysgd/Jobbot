@@ -1,8 +1,3 @@
-"""
-Бот для управления заявками на работу через MAX API.
-Адаптирован для деплоя на Amvera Cloud.
-"""
-
 import asyncio
 import logging
 import json
@@ -251,18 +246,20 @@ async def handle_callback(event: MessageCallback):
         await event.answer(notification="❌ Ошибка: не найден ID сообщения")
         return
 
-    if chat_id != GROUP_ID:
-        return
-
     msg_id_str = str(message_id)
-    job = jobs_db.get(msg_id_str)
 
-    if not job:
-        await event.answer(notification="❌ Заявка не найдена")
-        return
-
-    # === БРОНИРОВАНИЕ ===
+    # === БРОНИРОВАНИЕ (Беру / Беру вдвоём) — только из группы ===
     if action == "take":
+        # Проверяем, что callback из группы
+        if chat_id != GROUP_ID:
+            logger.info(f"TAKE: ignored — chat_id {chat_id} != GROUP_ID {GROUP_ID}")
+            return
+
+        job = jobs_db.get(msg_id_str)
+        if not job:
+            await event.answer(notification="❌ Заявка не найдена")
+            return
+
         if job["status"] != "free":
             await event.answer(notification="❌ Заявка уже забронирована или закрыта")
             return
@@ -288,7 +285,7 @@ async def handle_callback(event: MessageCallback):
 
             await event.answer(notification=f"✅ Вы забронировали заявку ({type_label})!")
 
-            # Уведомление админу — пробуем через user_id (личное сообщение)
+            # Уведомление админу
             admin_text = (
                 "🔔 Новая бронь!\n\n"
                 f"📋 Заявка: {job['text'][:100]}{'...' if len(job['text']) > 100 else ''}\n\n"
@@ -300,40 +297,17 @@ async def handle_callback(event: MessageCallback):
 
             admin_attachments = build_admin_keyboard(msg_id_str)
 
-            # Пробуем отправить через user_id (личное сообщение)
-            # Если не получится — отправим в группу с упоминанием админа
             admin_msg_id = None
             try:
                 admin_response = await bot.send_message(
-                    user_id=ADMIN_ID,  # Отправляем по user_id вместо chat_id
+                    user_id=ADMIN_ID,
                     text=admin_text,
                     attachments=admin_attachments
                 )
                 admin_msg_id = str(admin_response.message.body.mid) if admin_response.message and admin_response.message.body else None
-                logger.info(f"Admin notified via user_id, admin_msg_id={admin_msg_id}")
+                logger.info(f"Admin notified, admin_msg_id={admin_msg_id}")
             except Exception as e:
-                logger.warning(f"Failed to notify admin via user_id: {e}")
-                # Пробуем через chat_id (если есть диалог)
-                try:
-                    admin_response = await bot.send_message(
-                        chat_id=ADMIN_ID,
-                        text=admin_text,
-                        attachments=admin_attachments
-                    )
-                    admin_msg_id = str(admin_response.message.body.mid) if admin_response.message and admin_response.message.body else None
-                    logger.info(f"Admin notified via chat_id, admin_msg_id={admin_msg_id}")
-                except Exception as e2:
-                    logger.error(f"Failed to notify admin via chat_id: {e2}")
-                    # Отправляем в группу с упоминанием админа
-                    try:
-                        mention_text = f"@{ADMIN_ID}\n\n{admin_text}"
-                        await bot.send_message(
-                            chat_id=GROUP_ID,
-                            text=mention_text
-                        )
-                        logger.info("Admin notified via group mention")
-                    except Exception as e3:
-                        logger.error(f"Failed to notify admin via group: {e3}")
+                logger.warning(f"Failed to notify admin: {e}")
 
             job["admin_msg_id"] = admin_msg_id
             logger.info(f"Job booked: msg_id={message_id}, user={user_name}, type={take_type}")
@@ -344,16 +318,17 @@ async def handle_callback(event: MessageCallback):
             job["user_id"] = None
             await event.answer(notification="❌ Произошла ошибка, попробуйте позже")
 
-    # === ЗАКРЫТИЕ ===
+    # === ЗАКРЫТИЕ ЗАЯВКИ (админ нажимает "Закрыть" в личке) ===
     elif action == "close":
+        # Проверяем, что закрывает админ (не важно, из какого чата)
+        if user_id != ADMIN_ID:
+            await event.answer(notification="❌ Только администратор может закрывать заявки")
+            return
+
         job_msg_id = data.get("job_msg_id")
 
         if not job_msg_id:
             await event.answer(notification="❌ Ошибка: не найдена заявка")
-            return
-
-        if user_id != ADMIN_ID:
-            await event.answer(notification="❌ Только администратор может закрывать заявки")
             return
 
         job_msg_id_str = str(job_msg_id)
@@ -374,22 +349,22 @@ async def handle_callback(event: MessageCallback):
         )
 
         try:
+            # Обновляем сообщение в группе
             await bot.edit_message(
                 message_id=job_msg_id,
                 text=closed_text
             )
+            logger.info(f"Group message {job_msg_id} edited to closed")
 
-            if job_to_close.get("admin_msg_id"):
-                text = job_to_close['text'][:100]
-                if len(job_to_close['text']) > 100:
-                    text += "..."
-                try:
-                    await bot.edit_message(
-                        message_id=job_to_close["admin_msg_id"],
-                        text=f"✅ Заявка закрыта\n\n{text}"
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to edit admin message: {e}")
+            # Удаляем кнопки у админа (редактируем текущее сообщение в личке)
+            text = job_to_close['text'][:100]
+            if len(job_to_close['text']) > 100:
+                text += "..."
+            await message.edit(
+                text=f"✅ Заявка закрыта\n\n{text}",
+                attachments=[]
+            )
+            logger.info("Admin message edited to closed")
 
             await event.answer(notification="✅ Заявка закрыта!")
             logger.info(f"Job closed: msg_id={job_msg_id}")
