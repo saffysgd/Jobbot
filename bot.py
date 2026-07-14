@@ -297,6 +297,10 @@ async def handle_callback(event: MessageCallback):
 
             await event.answer(notification=f"✅ Вы забронировали заявку ({type_label})!")
 
+            from maxapi.enums.parse_mode import ParseMode
+            
+            # ... в обработчике action == "take":
+            
             # Уведомление админу с markdown-упоминанием
             display_name = user.first_name if user else "Исполнитель"
             if user and user.last_name:
@@ -310,6 +314,21 @@ async def handle_callback(event: MessageCallback):
                 + f"📌 Тип: {type_label}\n\n"
                 + "Нажмите кнопку \"Закрыть\" после завершения работы."
             )
+            
+            admin_attachments = build_admin_keyboard(msg_id_str)
+            
+            try:
+                admin_response = await bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=admin_text,
+                    attachments=admin_attachments,
+                    parse_mode=ParseMode.MARKDOWN  # <-- ИСПРАВЛЕНО: parse_mode вместо format
+                )
+                admin_msg_id = str(admin_response.message.body.mid) if admin_response.message and admin_response.message.body else None
+                logger.info(f"Admin notified, admin_msg_id={admin_msg_id}")
+            except Exception as e:
+                logger.warning(f"Failed to notify admin: {e}")
+
 
 
             admin_attachments = build_admin_keyboard(msg_id_str)
