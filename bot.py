@@ -53,6 +53,8 @@ dp = Dispatcher()
 
 def get_user_name(user) -> str:
     """Получает имя пользователя из объекта User."""
+    if user is None:
+        return "Unknown"
     if user.username:
         return f"@{user.username}"
     name = user.first_name
@@ -169,7 +171,7 @@ async def on_bot_started(event: BotStarted):
 @dp.message_created(Command("start"))
 async def cmd_start(event: MessageCreated):
     """Обработка команды /start."""
-    user_id = event.message.sender.user_id
+    user_id = event.message.sender.user_id if event.message.sender else None
 
     if user_id == ADMIN_ID:
         await event.message.answer(
@@ -190,7 +192,7 @@ async def cmd_start(event: MessageCreated):
 @dp.message_created()
 async def handle_admin_message(event: MessageCreated):
     """Обработка сообщений от администратора (новые заявки)."""
-    user_id = event.message.sender.user_id
+    user_id = event.message.sender.user_id if event.message.sender else None
     chat_id = event.message.recipient.chat_id
 
     if user_id != ADMIN_ID:
@@ -199,7 +201,7 @@ async def handle_admin_message(event: MessageCreated):
         await event.message.answer("❌ Отправляйте заявки мне в личку, а не в группу!")
         return
 
-    job_text = event.message.body.text
+    job_text = event.message.body.text if event.message.body else None
     if not job_text:
         await event.message.answer("❌ Отправьте текстовое сообщение с описанием заявки.")
         return
@@ -214,7 +216,8 @@ async def handle_admin_message(event: MessageCreated):
             attachments=attachments
         )
 
-        group_message_id = str(response.message_id)
+        # SendedMessage имеет поле message (Message), у которого body.mid — ID сообщения
+        group_message_id = str(response.message.body.mid) if response.message and response.message.body else None
         if group_message_id:
             jobs_db[group_message_id] = {
                 "status": "free",
@@ -264,8 +267,13 @@ async def handle_callback(event: MessageCallback):
         await event.answer(notification="❌ Ошибка: не найдено сообщение")
         return
 
-    message_id = message.message_id
+    # message_id берём из body.mid
+    message_id = message.body.mid if message.body else None
     chat_id = message.recipient.chat_id if message.recipient else None
+
+    if not message_id:
+        await event.answer(notification="❌ Ошибка: не найден ID сообщения")
+        return
 
     if chat_id != GROUP_ID:
         return
@@ -296,7 +304,7 @@ async def handle_callback(event: MessageCallback):
 
         try:
             # Редактируем сообщение в группе (убираем кнопки)
-            await event.message.edit(
+            await message.edit(
                 text=updated_text,
                 attachments=[]
             )
@@ -310,13 +318,14 @@ async def handle_callback(event: MessageCallback):
 
             admin_attachments = build_admin_keyboard(msg_id_str)
 
-            admin_msg = await bot.send_message(
+            admin_response = await bot.send_message(
                 chat_id=ADMIN_ID,
                 text=admin_text,
                 attachments=admin_attachments
             )
 
-            admin_msg_id = str(admin_msg.message_id)
+            # ID уведомления админа — из body.mid
+            admin_msg_id = str(admin_response.message.body.mid) if admin_response.message and admin_response.message.body else None
             job["admin_msg_id"] = admin_msg_id
 
             logger.info(
