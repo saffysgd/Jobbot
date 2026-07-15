@@ -277,17 +277,14 @@ async def handle_callback(event: MessageCallback):
             await event.answer(notification="❌ Заявка не найдена")
             return
 
-        # ← БЛОКИРОВКА: защита от гонки
         lock = get_job_lock(msg_id_str)
         
         async with lock:
-            # ДВОЙНАЯ ПРОВЕРКА внутри блокировки
             job = jobs_db.get(msg_id_str)
             if not job or job["status"] != "free":
                 await event.answer(notification="❌ Заявка уже забронирована или закрыта")
                 return
 
-            # Атомарная запись
             job["status"] = "booked"
             job["user_id"] = user_id
             job["user_name"] = user_name
@@ -308,7 +305,6 @@ async def handle_callback(event: MessageCallback):
 
             await event.answer(notification=f"✅ Вы забронировали заявку ({type_label})!")
 
-            # Уведомление админу с markdown-упоминанием
             display_name = user.first_name if user else "Исполнитель"
             if user and user.last_name:
                 display_name += f" {user.last_name}"
@@ -327,10 +323,10 @@ async def handle_callback(event: MessageCallback):
             admin_msg_id = None
             try:
                 admin_response = await bot.send_message(
-                    chat_id=ADMIN_ID,
+                    user_id=ADMIN_ID,  # ← user_id для личных сообщений
                     text=admin_text,
                     attachments=admin_attachments,
-                    parse_mode=ParseMode.MARKDOWN  # ← Исправлено: parse_mode
+                    parse_mode=ParseMode.MARKDOWN
                 )
                 admin_msg_id = str(admin_response.message.body.mid) if admin_response.message and admin_response.message.body else None
                 logger.info(f"Admin notified, admin_msg_id={admin_msg_id}")
@@ -342,11 +338,11 @@ async def handle_callback(event: MessageCallback):
 
         except Exception as e:
             logger.error(f"Failed to process booking: {e}", exc_info=True)
-            # Откат при ошибке
             async with lock:
                 job["status"] = "free"
                 job["user_id"] = None
             await event.answer(notification="❌ Произошла ошибка, попробуйте позже")
+
 
     # === ЗАКРЫТИЕ ===
     elif action == "close":
