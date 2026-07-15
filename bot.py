@@ -1,8 +1,3 @@
-"""
-Бот для управления заявками на работу через MAX API.
-Адаптирован для деплоя на Amvera Cloud.
-"""
-
 import asyncio
 import logging
 import json
@@ -24,6 +19,7 @@ from maxapi.types import (
     ClipboardButton,
 )
 from maxapi.enums.intent import Intent
+from maxapi.enums.parse_mode import ParseMode
 
 # ==================== КОНФИГУРАЦИЯ ====================
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
@@ -42,6 +38,7 @@ if GROUP_ID > 0:
     GROUP_ID = -GROUP_ID
 
 jobs_db: Dict[str, Any] = {}
+job_locks: Dict[str, asyncio.Lock] = {}  # ← БЛОКИРОВКИ для защиты от гонки
 
 # ==================== ЛОГИРОВАНИЕ ====================
 logging.basicConfig(
@@ -65,6 +62,13 @@ def get_user_name(user) -> str:
     if user.last_name:
         name += f" {user.last_name}"
     return name or f"User_{user.user_id}"
+
+
+def get_job_lock(job_msg_id: str) -> asyncio.Lock:
+    """Получить или создать блокировку для заявки."""
+    if job_msg_id not in job_locks:
+        job_locks[job_msg_id] = asyncio.Lock()
+    return job_locks[job_msg_id]
 
 
 def build_job_keyboard(status: str = "free") -> Optional[list]:
@@ -273,14 +277,21 @@ async def handle_callback(event: MessageCallback):
             await event.answer(notification="❌ Заявка не найдена")
             return
 
-        if job["status"] != "free":
-            await event.answer(notification="❌ Заявка уже забронирована или закрыта")
-            return
+        # ← БЛОКИРОВКА: защита от гонки
+        lock = get_job_lock(msg_id_str)
+        
+        async with lock:
+            # ДВОЙНАЯ ПРОВЕРКА внутри блокировки
+            job = jobs_db.get(msg_id_str)
+            if not job or job["status"] != "free":
+                await event.answer(notification="❌ Заявка уже забронирована или закрыта")
+                return
 
-        job["status"] = "booked"
-        job["user_id"] = user_id
-        job["user_name"] = user_name
-        job["take_type"] = take_type
+            # Атомарная запись
+            job["status"] = "booked"
+            job["user_id"] = user_id
+            job["user_name"] = user_name
+            job["take_type"] = take_type
 
         type_label = "вдвоём" if take_type == "pair" else "один"
 
@@ -297,15 +308,11 @@ async def handle_callback(event: MessageCallback):
 
             await event.answer(notification=f"✅ Вы забронировали заявку ({type_label})!")
 
-            from maxapi.enums.parse_mode import ParseMode
-            
-            # ... в обработчике action == "take":
-            
             # Уведомление админу с markdown-упоминанием
             display_name = user.first_name if user else "Исполнитель"
             if user and user.last_name:
                 display_name += f" {user.last_name}"
-            
+
             admin_text = (
                 "🔔 Новая бронь!\n\n"
                 + f"📋 Заявка:\n{job['text']}\n\n"
@@ -314,32 +321,16 @@ async def handle_callback(event: MessageCallback):
                 + f"📌 Тип: {type_label}\n\n"
                 + "Нажмите кнопку \"Закрыть\" после завершения работы."
             )
-            
-            admin_attachments = build_admin_keyboard(msg_id_str)
-            
-            try:
-                admin_response = await bot.send_message(
-                    chat_id=ADMIN_ID,
-                    text=admin_text,
-                    attachments=admin_attachments,
-                    parse_mode=ParseMode.MARKDOWN  # <-- ИСПРАВЛЕНО: parse_mode вместо format
-                )
-                admin_msg_id = str(admin_response.message.body.mid) if admin_response.message and admin_response.message.body else None
-                logger.info(f"Admin notified, admin_msg_id={admin_msg_id}")
-            except Exception as e:
-                logger.warning(f"Failed to notify admin: {e}")
-
-
 
             admin_attachments = build_admin_keyboard(msg_id_str)
 
             admin_msg_id = None
             try:
                 admin_response = await bot.send_message(
-                    user_id=ADMIN_ID,
+                    chat_id=ADMIN_ID,
                     text=admin_text,
                     attachments=admin_attachments,
-                    format="markdown"
+                    parse_mode=ParseMode.MARKDOWN  # ← Исправлено: parse_mode
                 )
                 admin_msg_id = str(admin_response.message.body.mid) if admin_response.message and admin_response.message.body else None
                 logger.info(f"Admin notified, admin_msg_id={admin_msg_id}")
@@ -351,8 +342,10 @@ async def handle_callback(event: MessageCallback):
 
         except Exception as e:
             logger.error(f"Failed to process booking: {e}", exc_info=True)
-            job["status"] = "free"
-            job["user_id"] = None
+            # Откат при ошибке
+            async with lock:
+                job["status"] = "free"
+                job["user_id"] = None
             await event.answer(notification="❌ Произошла ошибка, попробуйте позже")
 
     # === ЗАКРЫТИЕ ===
@@ -375,6 +368,10 @@ async def handle_callback(event: MessageCallback):
             return
 
         job_to_close["status"] = "closed"
+
+        # Очистка блокировки при закрытии
+        if job_msg_id_str in job_locks:
+            del job_locks[job_msg_id_str]
 
         closed_text = build_group_message(
             job_to_close["text"], "closed", created_at=job_to_close.get("created_at")
