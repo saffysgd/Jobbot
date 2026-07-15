@@ -77,10 +77,11 @@ def build_admin_keyboard(job_msg_id: str) -> list:
 
 
 def build_group_message(job_text: str, status: str) -> str:
+    """Статус в конце текста."""
     if status == "active":
-        return f"🟢 Активна\n\n{job_text}"
+        return f"{job_text}\n\nСтатус: Заявка актуальна ✅"
     elif status == "closed":
-        return f"❌ Закрыта\n\n{job_text}"
+        return f"{job_text}\n\nСтатус: Заявка закрыта ❌"
     return job_text
 
 
@@ -196,7 +197,7 @@ async def handle_callback(event: MessageCallback):
         job_to_close["status"] = "closed"
 
         try:
-            # Закрываем в группе
+            # Закрываем в группе — статус в конце
             closed_text = build_group_message(job_to_close["text"], "closed")
             await bot.edit_message(message_id=job_msg_id, text=closed_text)
 
@@ -206,7 +207,7 @@ async def handle_callback(event: MessageCallback):
                 text += "..."
 
             await message.edit(
-                text=f"✅ Закрыта\n\n{text}",
+                text=f"{text}\n\nСтатус: Заявка закрыта ❌",
                 attachments=[]
             )
 
