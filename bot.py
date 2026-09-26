@@ -18,6 +18,7 @@ from maxapi.types import (
     LinkButton,
 )
 from maxapi.enums.intent import Intent
+from storage import JobStore
 
 # ==================== КОНФИГУРАЦИЯ ====================
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
@@ -47,7 +48,7 @@ if ADMIN_IDS_STR:
             except ValueError:
                 pass
 
-jobs_db: Dict[str, Any] = {}
+job_store = JobStore(os.environ.get("DATABASE_PATH", "jobs.db"))
 
 # ==================== ЛОГИРОВАНИЕ ====================
 logging.basicConfig(
@@ -158,11 +159,12 @@ async def handle_admin_message(event: MessageCreated):
         group_message_id = str(response.message.body.mid) if response.message and response.message.body else None
 
         if group_message_id:
-            jobs_db[group_message_id] = {
+            job_data = {
                 "status": "active",
                 "text": job_text,
-                "admin_msg_ids": {},  # ← храним ID сообщений всех админов
+                "admin_msg_ids": {},
             }
+            job_store.save(group_message_id, job_data)
 
             # Дублируем ВСЕМ админам с кнопкой закрыть
             admin_attachments = build_admin_keyboard(group_message_id)
@@ -174,7 +176,8 @@ async def handle_admin_message(event: MessageCreated):
                         attachments=admin_attachments
                     )
                     admin_msg_id = str(admin_response.message.body.mid) if admin_response.message and admin_response.message.body else None
-                    jobs_db[group_message_id]["admin_msg_ids"][str(admin_id)] = admin_msg_id
+                    job_data["admin_msg_ids"][str(admin_id)] = admin_msg_id
+                    job_store.save(group_message_id, job_data)
                     logger.info(f"Sent to admin {admin_id}, msg_id={admin_msg_id}")
                 except Exception as e:
                     logger.warning(f"Failed to notify admin {admin_id}: {e}")
@@ -214,13 +217,14 @@ async def handle_callback(event: MessageCallback):
             return
 
         job_msg_id_str = str(job_msg_id)
-        job_to_close = jobs_db.get(job_msg_id_str)
+        job_to_close = job_store.get(job_msg_id_str)
 
         if not job_to_close:
             await event.answer(notification="❌ Заявка не найдена")
             return
 
         job_to_close["status"] = "closed"
+        job_store.save(job_msg_id_str, job_to_close)
 
         try:
             # Закрываем в группе
@@ -266,6 +270,7 @@ async def handle_callback(event: MessageCallback):
 # ==================== ЗАПУСК ====================
 
 async def main():
+    job_store.initialize()
     logger.info("=" * 60)
     logger.info("BOT STARTING")
     logger.info(f"ADMINS={ADMIN_IDS}, GROUP_ID={GROUP_ID}")
