@@ -48,7 +48,7 @@ if ADMIN_IDS_STR:
             except ValueError:
                 pass
 
-job_store = JobStore(os.environ.get("DATABASE_PATH", "jobs.db"))
+job_store = JobStore()
 
 # ==================== ЛОГИРОВАНИЕ ====================
 logging.basicConfig(
