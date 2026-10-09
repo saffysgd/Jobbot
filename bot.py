@@ -16,9 +16,11 @@ from maxapi.types import (
     ButtonsPayload,
     Attachment,
     LinkButton,
+    UserRemoved,
 )
 from maxapi.enums.intent import Intent
 from storage import JobStore
+from notifications import build_user_removed_notification
 
 # ==================== КОНФИГУРАЦИЯ ====================
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
@@ -188,6 +190,39 @@ async def handle_admin_message(event: MessageCreated):
     except Exception as e:
         logger.error(f"Failed: {e}", exc_info=True)
         await event.message.answer(f"❌ Ошибка: {e}")
+
+
+@dp.user_removed()
+async def handle_user_removed(event: UserRemoved):
+    """Notify admins when a member leaves or is removed from the configured group."""
+    if event.chat_id != GROUP_ID or event.is_channel:
+        return
+
+    user = event.user
+    notification = build_user_removed_notification(
+        user_id=user.user_id,
+        first_name=getattr(user, "first_name", None),
+        last_name=getattr(user, "last_name", None),
+        username=getattr(user, "username", None),
+        admin_id=event.admin_id,
+    )
+
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(user_id=admin_id, text=notification)
+        except Exception as e:
+            logger.warning(
+                "Failed to notify admin %s about member removal: %s",
+                admin_id,
+                e,
+            )
+
+    logger.info(
+        "Processed member removal: group_id=%s user_id=%s admin_id=%s",
+        event.chat_id,
+        user.user_id,
+        event.admin_id,
+    )
 
 
 # ==================== CALLBACK'И ====================
