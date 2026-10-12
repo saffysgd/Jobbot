@@ -1,2 +1,2 @@
-maxapi>=1.0.0
+maxapi>=1.2.3
 psycopg[binary]>=3.2,<4
