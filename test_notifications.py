@@ -23,7 +23,7 @@ class UserRemovedNotificationTests(unittest.TestCase):
             admin_id=7,
         )
 
-        self.assertIn("удалён администратором (ID 7)", message)
+        self.assertIn("удалён администратором из группы (ID 7)", message)
         self.assertIn("Имя: Иван", message)
         self.assertIn("ID пользователя: 51", message)
 
