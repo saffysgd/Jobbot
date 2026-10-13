@@ -23,9 +23,19 @@ class UserRemovedNotificationTests(unittest.TestCase):
             admin_id=7,
         )
 
-        self.assertIn("удалён администратором (ID 7)", message)
+        self.assertIn("удалён администратором из группы (ID 7)", message)
         self.assertIn("Имя: Иван", message)
         self.assertIn("ID пользователя: 51", message)
+
+    def test_channel_exit_is_identified_as_channel(self):
+        message = build_user_removed_notification(
+            user_id=77,
+            first_name="Мария",
+            is_channel=True,
+        )
+
+        self.assertIn("самостоятельно покинул канал", message)
+        self.assertIn("Имя: Мария", message)
 
     def test_missing_name_falls_back_to_username_or_id(self):
         with_username = build_user_removed_notification(user_id=63, username="member")

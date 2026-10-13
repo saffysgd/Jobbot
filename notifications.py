@@ -7,6 +7,7 @@ def build_user_removed_notification(
     last_name: Optional[str] = None,
     username: Optional[str] = None,
     admin_id: Optional[int] = None,
+    is_channel: bool = False,
 ) -> str:
     """Build a private admin notice for a member leaving or being removed."""
     name_parts = [part.strip() for part in (first_name, last_name) if part and part.strip()]
@@ -18,9 +19,11 @@ def build_user_removed_notification(
     if not display_name:
         display_name = f"Пользователь {user_id}"
 
+    chat_name = "канал" if is_channel else "группу"
+    removal_place = "из канала" if is_channel else "из группы"
     if admin_id is None:
-        headline = "👋 Участник самостоятельно покинул группу"
+        headline = f"👋 Участник самостоятельно покинул {chat_name}"
     else:
-        headline = f"🚫 Участник удалён администратором (ID {admin_id})"
+        headline = f"🚫 Участник удалён администратором {removal_place} (ID {admin_id})"
 
     return f"{headline}\nИмя: {display_name}\nID пользователя: {user_id}"
