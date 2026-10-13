@@ -195,7 +195,7 @@ async def handle_admin_message(event: MessageCreated):
 @dp.user_removed()
 async def handle_user_removed(event: UserRemoved):
     """Notify admins when a member leaves or is removed from the configured group."""
-    if event.chat_id != GROUP_ID or event.is_channel:
+    if event.chat_id != GROUP_ID:
         return
 
     user = event.user
@@ -205,6 +205,7 @@ async def handle_user_removed(event: UserRemoved):
         last_name=getattr(user, "last_name", None),
         username=getattr(user, "username", None),
         admin_id=event.admin_id,
+        is_channel=event.is_channel,
     )
 
     for admin_id in ADMIN_IDS:
@@ -218,8 +219,9 @@ async def handle_user_removed(event: UserRemoved):
             )
 
     logger.info(
-        "Processed member removal: group_id=%s user_id=%s admin_id=%s",
+        "Processed member removal: chat_id=%s is_channel=%s user_id=%s admin_id=%s",
         event.chat_id,
+        event.is_channel,
         user.user_id,
         event.admin_id,
     )
