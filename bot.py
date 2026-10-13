@@ -239,20 +239,6 @@ async def handle_user_removed(event: UserRemoved):
             e,
         )
 
-    for admin_id in ADMIN_IDS:
-        try:
-            await bot.send_message(
-                user_id=admin_id,
-                text=notification,
-                attachments=[contact_card],
-            )
-        except Exception as e:
-            logger.warning(
-                "Failed to notify admin %s about member removal: %s",
-                admin_id,
-                e,
-            )
-
     logger.info(
         "Processed member removal: chat_id=%s is_channel=%s user_id=%s admin_id=%s",
         event.chat_id,
