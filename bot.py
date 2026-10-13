@@ -30,6 +30,9 @@ ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
 # Дополнительные админы через запятую в переменной окружения ADMIN_IDS
 ADMIN_IDS_STR = os.environ.get("ADMIN_IDS", "")
 GROUP_ID = int(os.environ.get("GROUP_ID", "0"))
+LEAVE_NOTIFY_CHANNEL_ID = int(
+    os.environ.get("LEAVE_NOTIFY_CHANNEL_ID", "-80062952228285")
+)
 TOKEN = os.environ.get("MAX_BOT_TOKEN", "")
 
 if not TOKEN:
@@ -41,6 +44,8 @@ if GROUP_ID == 0:
 
 if GROUP_ID > 0:
     GROUP_ID = -GROUP_ID
+if LEAVE_NOTIFY_CHANNEL_ID > 0:
+    LEAVE_NOTIFY_CHANNEL_ID = -LEAVE_NOTIFY_CHANNEL_ID
 
 # Собираем всех админов в множество
 ADMIN_IDS: Set[int] = {ADMIN_ID}
@@ -217,19 +222,22 @@ async def handle_user_removed(event: UserRemoved):
         username=getattr(user, "username", None),
     )
 
-    for admin_id in ADMIN_IDS:
-        try:
-            await bot.send_message(
-                user_id=admin_id,
-                text=notification,
-                attachments=[contact_card],
-            )
-        except Exception as e:
-            logger.warning(
-                "Failed to notify admin %s about member removal: %s",
-                admin_id,
-                e,
-            )
+    try:
+        await bot.send_message(
+            chat_id=LEAVE_NOTIFY_CHANNEL_ID,
+            text=notification,
+            attachments=[contact_card],
+        )
+        logger.info(
+            "Sent member removal notification to channel %s",
+            LEAVE_NOTIFY_CHANNEL_ID,
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to notify channel %s about member removal: %s",
+            LEAVE_NOTIFY_CHANNEL_ID,
+            e,
+        )
 
     logger.info(
         "Processed member removal: chat_id=%s is_channel=%s user_id=%s admin_id=%s",
@@ -324,6 +332,7 @@ async def main():
     logger.info("=" * 60)
     logger.info("BOT STARTING")
     logger.info(f"ADMINS={ADMIN_IDS}, GROUP_ID={GROUP_ID}")
+    logger.info(f"LEAVE_NOTIFY_CHANNEL_ID={LEAVE_NOTIFY_CHANNEL_ID}")
     logger.info("=" * 60)
     await dp.start_polling(bot)
 
