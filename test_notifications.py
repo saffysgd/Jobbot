@@ -1,9 +1,38 @@
 import unittest
 
-from notifications import build_user_removed_notification
+from notifications import (
+    build_user_contact_attachment,
+    build_user_removed_notification,
+)
 
 
 class UserRemovedNotificationTests(unittest.TestCase):
+    def test_contact_card_uses_registered_max_user_id(self):
+        attachment = build_user_contact_attachment(
+            user_id=42,
+            first_name="Анна",
+            last_name="Петрова",
+            username="anna",
+        )
+
+        self.assertEqual(
+            attachment.model_dump(),
+            {
+                "type": "contact",
+                "payload": {
+                    "name": "Анна Петрова",
+                    "contact_id": 42,
+                },
+            },
+        )
+
+    def test_contact_card_falls_back_to_username_then_id(self):
+        with_username = build_user_contact_attachment(user_id=43, username="@member")
+        without_name = build_user_contact_attachment(user_id=44)
+
+        self.assertEqual(with_username.model_dump()["payload"]["name"], "@member")
+        self.assertEqual(without_name.model_dump()["payload"]["name"], "Пользователь 44")
+
     def test_voluntary_exit_includes_user_identity(self):
         message = build_user_removed_notification(
             user_id=42,

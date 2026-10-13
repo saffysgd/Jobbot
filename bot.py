@@ -20,7 +20,10 @@ from maxapi.types import (
 )
 from maxapi.enums.intent import Intent
 from storage import JobStore
-from notifications import build_user_removed_notification
+from notifications import (
+    build_user_contact_attachment,
+    build_user_removed_notification,
+)
 
 # ==================== КОНФИГУРАЦИЯ ====================
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
@@ -207,10 +210,20 @@ async def handle_user_removed(event: UserRemoved):
         admin_id=event.admin_id,
         is_channel=event.is_channel,
     )
+    contact_card = build_user_contact_attachment(
+        user_id=user.user_id,
+        first_name=getattr(user, "first_name", None),
+        last_name=getattr(user, "last_name", None),
+        username=getattr(user, "username", None),
+    )
 
     for admin_id in ADMIN_IDS:
         try:
-            await bot.send_message(user_id=admin_id, text=notification)
+            await bot.send_message(
+                user_id=admin_id,
+                text=notification,
+                attachments=[contact_card],
+            )
         except Exception as e:
             logger.warning(
                 "Failed to notify admin %s about member removal: %s",
